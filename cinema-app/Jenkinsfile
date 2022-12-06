@@ -1,0 +1,136 @@
+pipeline {
+    agent any
+	
+	options {
+		buildDiscarder(logRotator(numToKeepStr: '5'))
+	}
+	
+    stages {
+        stage('Build') {
+        	when { expression {env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ 'feature*'}}
+            steps {
+            	echo 'Build stage.'
+                sh 'docker build -t cinema .'
+            }
+        }
+        stage('Unit Tests') {
+        	when { expression {env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ 'feature*'}}
+            steps {
+                echo 'Unit tests stage.' 
+                withCredentials([file(credentialsId: 'cinema-env', variable: 'ENV')]) {
+                    sh """
+               	        docker compose --env-file $ENV up -d 
+                	    docker exec cinema pytest app/tests/tests-unit.py
+                    """
+                }                
+            }
+        }
+        stage('Package') {
+        	when { expression {env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ 'feature*'}}
+            steps {
+                echo 'Package stage.'
+            }
+        }
+        stage('E2E Tests') {
+        	when { expression {env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ 'feature*'}}
+            steps {
+                echo 'E2e tests stage.'
+                sh "docker exec cinema pytest app/tests/tests-e2e.py"
+            }
+        }
+        stage('Tag') {
+        	when { expression {env.BRANCH_NAME == 'main' }}
+            steps {
+                echo 'Tag stage.'   
+                checkout([$class: 'GitSCM', branches: [[name: '**']], extensions: [], userRemoteConfigs: [[credentialsId: 'cinema', url: 'git@github.com:dawidtomczynski/Cinema-DevOps.git']]])
+                sh "git fetch --tags || true"
+                script {
+                    HIGHEST = sh(script: "git tag -l --sort=v:refname | tail -1", returnStdout: true).trim()
+                    if (HIGHEST.isEmpty()) {
+                        NEW_TAG = "0.1.0"
+                    } else {
+                        NEW_TAG = HIGHEST.split('\\.')
+                        NEW_TAG[1] = NEW_TAG[1].toInteger() + 1
+                        NEW_TAG = NEW_TAG.join('.')
+                    }
+                }
+                sh """
+                    git clean -f
+                    git tag ${NEW_TAG}
+                    git push --tags
+                    docker tag cinema 644435390668.dkr.ecr.eu-central-1.amazonaws.com/cinema:${NEW_TAG}
+                    docker tag cinema 644435390668.dkr.ecr.eu-central-1.amazonaws.com/cinema:latest
+                """
+            }
+        }
+        stage('Publish') {
+        	when { expression {env.BRANCH_NAME == 'main' }}
+            steps {
+                echo 'Publish stage.'
+                sh """
+                	aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin 644435390668.dkr.ecr.eu-central-1.amazonaws.com/cinema
+                	docker push 644435390668.dkr.ecr.eu-central-1.amazonaws.com/cinema:${NEW_TAG}
+                	docker push 644435390668.dkr.ecr.eu-central-1.amazonaws.com/cinema:latest
+                """
+            }
+        }
+        stage('Deploy') {
+        	when { expression {env.BRANCH_NAME == 'main' }}
+            steps {
+                echo 'Deploy stage.'
+                sh "mkdir gitops"
+                dir('gitops') {
+                    git branch: 'main',
+                        credentialsId: 'cinema-config',
+                        url: 'git@github.com:dawidtomczynski/cinema-config.git'
+                    sh """
+                        sed -i 's/${HIGHEST}/${NEW_TAG}/g' cinema-app/cinema-app.yaml
+                        git add .
+                        git commit -m update-image-tag
+                    """
+                    sshagent(['cinema-config']) {
+                        sh "git push --set-upstream origin main"
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo 'Success.'
+            script {
+                if ( env.BRANCH_NAME == 'main' ) {
+                    emailext body: "Deployment of cinema application succedded - new version ${NEW_TAG}.", subject: 'Project Cinema - deployment succedded!', to: 'dawidtomczynski@gmail.com'
+                }
+                if ( env.BRANCH_NAME =~ 'feature*' ) {
+                    emailext body: "All tests for cinema application on branch ${BRANCH_NAME} succedded.", subject: 'Project Cinema - tests succedded!', to: 'dawidtomczynski@gmail.com'
+                }
+            }
+        }
+        failure {
+            echo 'Failure.'
+            script {
+                if ( env.BRANCH_NAME == 'main' ) {
+                    emailext body: "Deployment of cinema application failed.", subject: 'Project Cinema - deployment failed!', to: 'dawidtomczynski@gmail.com'
+                }
+                if ( env.BRANCH_NAME =~ 'feature*' ) {
+                    emailext body: "Some tests for cinema application on branch ${BRANCH_NAME} failed.", subject: 'Project Cinema - tests failed!', to: 'dawidtomczynski@gmail.com'
+                }
+            }
+        }
+        cleanup {
+            echo 'Cleanup.'
+            sh """
+            	docker compose down
+            	docker rmi cinema
+            """
+            script {
+                if (env.BRANCH_NAME == 'main') {
+                    sh "docker rmi 644435390668.dkr.ecr.eu-central-1.amazonaws.com/cinema"
+                }
+            }
+            cleanWs()
+        }
+    }
+}
+

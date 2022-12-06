@@ -1,0 +1,45 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana
+  namespace: default
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  destination:
+    namespace: default
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    targetRevision: "6.43.3"
+    chart: grafana
+    helm:
+      releaseName: grafana
+      parameters:
+      - name: "service.type"
+        value: "NodePort"
+      - name: "persistence.enabled"
+        value: "true"
+      - name: "adminPassword"
+        value: "example"
+      values: |
+        ingress:
+          enabled: true
+          ingressClassName: "alb"
+          pathtype: Prefix
+          path: /
+          hosts:
+            - $GRAFANA_DOMAIN
+          tls: 
+            - hosts:
+                - $GRAFANA_DOMAIN
+          annotations:
+            alb.ingress.kubernetes.io/scheme: internet-facing
+            alb.ingress.kubernetes.io/certificate-arn: $GRAFANA_ARN
+            external-dns.alpha.kubernetes.io/hostname: $GRAFANA_DOMAIN
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+      

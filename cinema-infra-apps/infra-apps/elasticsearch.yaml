@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: elasticsearch
+  namespace: default
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  destination:
+    namespace: default
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    repoURL: https://helm.elastic.co
+    targetRevision: "8.5.1"
+    chart: elasticsearch
+    helm:
+      releaseName: elasticsearch
+      parameters:
+      - name: "replicas"
+        value: "1"
+      - name: "minimumMasterNodes"
+        value: "1"
+      - name: "maxUnavailable"
+        value: ""
+      - name: "secret.password"
+        value: "example"
+      - name: "volumeClaimTemplate.resources.requests.storage"
+        value: "5Gi"
+      - name: "resources.requests.cpu"
+        value: "500m"
+      - name: "resources.requests.memory"
+        value: "1Gi"
+      - name: "resources.limits.cpu"
+        value: "500m"
+      - name: "resources.limits.memory"
+        value: "1Gi"
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+      

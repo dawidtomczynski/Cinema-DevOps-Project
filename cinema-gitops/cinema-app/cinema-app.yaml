@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cinema
+  namespace: default
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  destination: 
+    server: https://kubernetes.default.svc
+    namespace: default
+  source:
+    repoURL: https://github.com/dawidtomczynski/Cinema-app
+    targetRevision: HEAD
+    path: charts/cinema/
+    helm:
+      parameters:
+      - name: "replicaCount"
+        value: "2"
+      - name: "image.tag"
+        value: "0.35.0"
+      - name: "Django.SECRET_KEY"
+        value: $DJANGO_SECRET_KEY
+      - name: "Django.DB_URL"
+        value: "mongodb://root:example@cinema-mongodb-0.mongo, cinema-mongodb-1.mongo, cinema-mongodb-2.mongo:27017/?replicaSet=rs0"
+      - name: "mongodb.replicaCount"
+        value: "3"
+      - name: "mongodb.auth.rootUser"
+        value: "root"
+      - name: "mongodb.auth.rootPassword"
+        value: "example"
+      values: |
+        ingress:
+          enabled: true
+          className: "alb"
+          annotations: 
+            alb.ingress.kubernetes.io/scheme: internet-facing
+            alb.ingress.kubernetes.io/certificate-arn: $CERTIFICATE_ARN
+            external-dns.alpha.kubernetes.io/hostname: $CINEMA_DOMAIN
+          hosts:
+            - host: $CINEMA_DOMAIN
+              paths:
+                - path: /
+                  pathType: Prefix
+          tls:
+            - secretName: cinema-cert-aws
+              hosts:
+                - $CINEMA_DOMAIN
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+      
