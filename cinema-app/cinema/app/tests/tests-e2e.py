@@ -39,7 +39,6 @@ def test_get_movie_list(client, set_up):
     response = client.get("/movies/", {}, format='json')
     print(len(response.data))
 
-    assert response.status_code == 200
     assert Movie.objects.count() == len(response.data)
 
 
@@ -48,7 +47,6 @@ def test_get_movie_detail(client, set_up):
     movie = Movie.objects.first()
     response = client.get(f"/movies/{movie.slug}/", {}, format='json')
 
-    assert response.status_code == 200
     for field in ("title", "year", "description", "director"):
         assert field in response.data
         
@@ -57,7 +55,6 @@ def test_get_movie_detail(client, set_up):
 def test_delete_movie(client, set_up):
     movie = Movie.objects.first()
     response = client.delete(f"/movies/{movie.slug}/", {}, format='json')
-    assert response.status_code == 204
     movie_pks = [movie.pk for movie in Movie.objects.all()]
     assert movie.pk not in movie_pks
     
@@ -70,7 +67,6 @@ def test_update_movie(client, set_up):
     new_year = int(faker.year())
     movie_data["year"] = new_year
     response = client.patch(f"/movies/{movie.slug}/", movie_data, format='json')
-    assert response.status_code == 200
     movie_obj = Movie.objects.get(pk=movie.pk)
     assert movie_obj.year == new_year
     
